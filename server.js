@@ -24,7 +24,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Prevent access to server files and secrets
+// Protect private server files
 app.use((req, res, next) => {
   const blocked = [
     /^\/server\.js$/i,
@@ -42,20 +42,26 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve the website
+// Serve all frontend files from the repository
 app.use(express.static(__dirname, {
-  index: "index.html",
-  dotfiles: "deny"
+  index: false,
+  dotfiles: "deny",
+  extensions: ["html"]
 }));
 
-// Main page
+// Main website
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
 // Frontend route fallback
 app.use((req, res, next) => {
-  if (req.method !== "GET" || req.path.startsWith("/socket.io/")) {
+  if (
+    req.method !== "GET" ||
+    req.path.startsWith("/socket.io/") ||
+    path.extname(req.path) !== "" ||
+    !req.accepts("html")
+  ) {
     return next();
   }
 
