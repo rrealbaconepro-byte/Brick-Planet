@@ -2,7 +2,6 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const admin = require("firebase-admin");
 
 const app = express();
 const server = http.createServer(app);
@@ -16,27 +15,7 @@ const io = new Server(server, {
 
 app.use(express.json({ limit: "1mb" }));
 
-// Firebase Admin initialization
-if (!admin.apps.length) {
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
-
-  if (!serviceAccount) {
-    throw new Error(
-      "Missing FIREBASE_SERVICE_ACCOUNT_BASE64 environment variable."
-    );
-  }
-
-  const credentials = JSON.parse(
-    Buffer.from(serviceAccount, "base64").toString("utf8")
-  );
-
-  admin.initializeApp({
-    credential: admin.credential.cert(credentials)
-  });
-}
-
-const db = admin.firestore();
-
+// Brick Planet home endpoint
 app.get("/", (req, res) => {
   res.json({
     name: "Brick Planet",
@@ -45,10 +24,14 @@ app.get("/", (req, res) => {
   });
 });
 
+// Health check
 app.get("/health", (req, res) => {
-  res.json({ status: "healthy" });
+  res.json({
+    status: "healthy"
+  });
 });
 
+// Multiplayer connection foundation
 io.on("connection", (socket) => {
   console.log("Player connected:", socket.id);
 
