@@ -26,13 +26,45 @@ for (const name of requiredEnv) {
   }
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  }),
-});
+// Render may store the PEM key with literal \\n characters or real line breaks.
+// Remove accidental wrapping quotes, normalize line breaks, and validate the PEM
+// before passing it to Firebase Admin.
+let firebasePrivateKey = process.env.FIREBASE_PRIVATE_KEY.trim();
+
+if (
+  (firebasePrivateKey.startsWith('"') && firebasePrivateKey.endsWith('"')) ||
+  (firebasePrivateKey.startsWith("'") && firebasePrivateKey.endsWith("'"))
+) {
+  firebasePrivateKey = firebasePrivateKey.slice(1, -1);
+}
+
+firebasePrivateKey = firebasePrivateKey.replace(/\\n/g, "\n").trim();
+
+if (
+  !firebasePrivateKey.includes("-----BEGIN PRIVATE KEY-----") ||
+  !firebasePrivateKey.includes("-----END PRIVATE KEY-----")
+) {
+  console.error(
+    "FIREBASE_PRIVATE_KEY is not a valid PEM private key. In Render, paste only the private_key value from your Firebase service-account JSON, including the BEGIN/END lines."
+  );
+  process.exit(1);
+}
+
+try {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: firebasePrivateKey,
+    }),
+  });
+} catch (error) {
+  console.error("Firebase Admin initialization failed:", error.message);
+  console.error(
+    "Check FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in Render. Do not paste the service-account JSON or Web API key into FIREBASE_PRIVATE_KEY."
+  );
+  process.exit(1);
+}
 
 const db = admin.firestore();
 const app = express();
