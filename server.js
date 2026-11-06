@@ -2,6 +2,7 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const fs = require("fs");
 const { Server } = require("socket.io");
 
 const app = express();
@@ -24,7 +25,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Protect private server files
+// Never expose private server files
 app.use((req, res, next) => {
   const blocked = [
     /^\/server\.js$/i,
@@ -42,11 +43,44 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve all frontend files from the repository
+// Support assets stored in the repository root,
+// even when index.html requests /js/, /css/, etc.
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return next();
+  }
+
+  const allowedFolders = [
+    "/js/",
+    "/css/",
+    "/fonts/",
+    "/images/",
+    "/assets/"
+  ];
+
+  if (!allowedFolders.some(folder => req.path.startsWith(folder))) {
+    return next();
+  }
+
+  const filename = path.basename(req.path);
+  const rootFile = path.join(__dirname, filename);
+
+  if (
+    filename &&
+    fs.existsSync(rootFile) &&
+    fs.statSync(rootFile).isFile()
+  ) {
+    return res.sendFile(rootFile);
+  }
+
+  next();
+});
+
+// Serve public files and folders from the repository
 app.use(express.static(__dirname, {
   index: false,
   dotfiles: "deny",
-  extensions: ["html"]
+  fallthrough: true
 }));
 
 // Main website
