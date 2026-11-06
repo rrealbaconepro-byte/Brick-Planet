@@ -1,8 +1,7 @@
 // Brick Planet (BPL) - Express + Socket.IO + Firebase Admin
-// Required Render environment variables:
-// FIREBASE_PROJECT_ID
-// FIREBASE_CLIENT_EMAIL
-// FIREBASE_PRIVATE_KEY
+// Firebase Admin credentials are read from Render environment variables.
+// Preferred: FIREBASE_SERVICE_ACCOUNT_BASE64 (Base64 of the ENTIRE service-account JSON)
+// Legacy fallback: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY
 // CLIENT_ORIGIN (your frontend URL, e.g. https://brick-planet.onrender.com)
 // PORT is supplied by Render.
 
@@ -13,55 +12,90 @@ const admin = require("firebase-admin");
 const { Server } = require("socket.io");
 require("dotenv").config();
 
-const requiredEnv = [
-  "FIREBASE_PROJECT_ID",
-  "FIREBASE_CLIENT_EMAIL",
-  "FIREBASE_PRIVATE_KEY",
-];
+function loadFirebaseServiceAccount() {
+  const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
 
-for (const name of requiredEnv) {
-  if (!process.env[name]) {
-    console.error(`Missing required environment variable: ${name}`);
+  if (encoded) {
+    try {
+      const json = Buffer.from(encoded.trim(), "base64").toString("utf8");
+      const serviceAccount = JSON.parse(json);
+
+      if (
+        !serviceAccount.project_id ||
+        !serviceAccount.client_email ||
+        !serviceAccount.private_key
+      ) {
+        throw new Error(
+          "The decoded service-account JSON is missing project_id, client_email, or private_key."
+        );
+      }
+
+      return serviceAccount;
+    } catch (error) {
+      console.error(
+        "Could not read FIREBASE_SERVICE_ACCOUNT_BASE64:",
+        error.message
+      );
+      process.exit(1);
+    }
+  }
+
+  // Backward-compatible fallback for separate Render environment variables.
+  const requiredEnv = [
+    "FIREBASE_PROJECT_ID",
+    "FIREBASE_CLIENT_EMAIL",
+    "FIREBASE_PRIVATE_KEY",
+  ];
+
+  for (const name of requiredEnv) {
+    if (!process.env[name]) {
+      console.error(
+        `Missing ${name}. Set FIREBASE_SERVICE_ACCOUNT_BASE64, or set all three legacy Firebase variables.`
+      );
+      process.exit(1);
+    }
+  }
+
+  let privateKey = process.env.FIREBASE_PRIVATE_KEY.trim();
+
+  if (
+    (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
+    (privateKey.startsWith("'") && privateKey.endsWith("'"))
+  ) {
+    privateKey = privateKey.slice(1, -1);
+  }
+
+  privateKey = privateKey.replace(/\\n/g, "\n").trim();
+
+  if (
+    !privateKey.includes("-----BEGIN PRIVATE KEY-----") ||
+    !privateKey.includes("-----END PRIVATE KEY-----")
+  ) {
+    console.error(
+      "FIREBASE_PRIVATE_KEY is not a valid PEM key. Use the exact private_key value from the service-account JSON."
+    );
     process.exit(1);
   }
-}
 
-// Render may store the PEM key with literal \\n characters or real line breaks.
-// Remove accidental wrapping quotes, normalize line breaks, and validate the PEM
-// before passing it to Firebase Admin.
-let firebasePrivateKey = process.env.FIREBASE_PRIVATE_KEY.trim();
-
-if (
-  (firebasePrivateKey.startsWith('"') && firebasePrivateKey.endsWith('"')) ||
-  (firebasePrivateKey.startsWith("'") && firebasePrivateKey.endsWith("'"))
-) {
-  firebasePrivateKey = firebasePrivateKey.slice(1, -1);
-}
-
-firebasePrivateKey = firebasePrivateKey.replace(/\\n/g, "\n").trim();
-
-if (
-  !firebasePrivateKey.includes("-----BEGIN PRIVATE KEY-----") ||
-  !firebasePrivateKey.includes("-----END PRIVATE KEY-----")
-) {
-  console.error(
-    "FIREBASE_PRIVATE_KEY is not a valid PEM private key. In Render, paste only the private_key value from your Firebase service-account JSON, including the BEGIN/END lines."
-  );
-  process.exit(1);
+  return {
+    project_id: process.env.FIREBASE_PROJECT_ID,
+    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+    private_key: privateKey,
+  };
 }
 
 try {
+  const serviceAccount = loadFirebaseServiceAccount();
   admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: firebasePrivateKey,
-    }),
+    credential: admin.credential.cert(serviceAccount),
   });
+  console.log(
+    `Firebase Admin connected to project: ${serviceAccount.project_id}`
+  );
 } catch (error) {
   console.error("Firebase Admin initialization failed:", error.message);
   console.error(
-    "Check FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY in Render. Do not paste the service-account JSON or Web API key into FIREBASE_PRIVATE_KEY."
+    "Check the Firebase service-account JSON stored in Render. Never put credentials in source code, frontend files, or Git."
   );
   process.exit(1);
 }
