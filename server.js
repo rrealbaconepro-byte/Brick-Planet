@@ -1,6 +1,7 @@
 
 const express = require("express");
 const http = require("http");
+const path = require("path");
 const { Server } = require("socket.io");
 
 const app = express();
@@ -15,24 +16,56 @@ const io = new Server(server, {
 
 app.use(express.json({ limit: "1mb" }));
 
-// Brick Planet home endpoint
-app.get("/", (req, res) => {
-  res.json({
-    name: "Brick Planet",
-    status: "online",
-    version: "1.0.0"
-  });
-});
-
 // Health check
 app.get("/health", (req, res) => {
   res.json({
+    name: "Brick Planet",
     status: "healthy"
   });
 });
 
+// Prevent access to server files and secrets
+app.use((req, res, next) => {
+  const blocked = [
+    /^\/server\.js$/i,
+    /^\/package(-lock)?\.json$/i,
+    /^\/\.env/i,
+    /^\/.*service-account.*\.json$/i,
+    /^\/node_modules(?:\/|$)/i,
+    /^\/\.git(?:\/|$)/i
+  ];
+
+  if (blocked.some(pattern => pattern.test(req.path))) {
+    return res.sendStatus(404);
+  }
+
+  next();
+});
+
+// Serve the website
+app.use(express.static(__dirname, {
+  index: "index.html",
+  dotfiles: "deny"
+}));
+
+// Main page
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+// Frontend route fallback
+app.use((req, res, next) => {
+  if (req.method !== "GET" || req.path.startsWith("/socket.io/")) {
+    return next();
+  }
+
+  res.sendFile(path.join(__dirname, "index.html"), err => {
+    if (err) next(err);
+  });
+});
+
 // Multiplayer connection foundation
-io.on("connection", (socket) => {
+io.on("connection", socket => {
   console.log("Player connected:", socket.id);
 
   socket.on("disconnect", () => {
